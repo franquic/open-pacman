@@ -1,6 +1,6 @@
 # SPEC 01 — Cuatro fantasmas con comportamiento propio
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende on:** —
 > **Fecha:** 2026-08-29
 > **Objetivo:** Los 4 fantasmas clásicos del arcade (agresivo, emboscador, flanqueador y cobarde) con salida escalonada de la caseta y alternancia dispersión/persecución.
