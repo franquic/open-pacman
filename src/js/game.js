@@ -379,3 +379,5 @@ function update( game ) {
 window.createGame = createGame;
 window.update = update;
 window.DIRS = DIRS;
+window.FRIGHTENED_FRAMES = FRIGHTENED_FRAMES;
+window.FRIGHTENED_FLASH_FRAMES = FRIGHTENED_FLASH_FRAMES;
