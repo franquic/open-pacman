@@ -24,7 +24,7 @@ function createGame() {
   grid[ PACMAN_START.y ][ PACMAN_START.x ] = 0;
 
   let dots = 0;
-  for ( const row of grid ) for ( const v of row ) if ( v === 2 ) dots++;
+  for ( const row of grid ) for ( const v of row ) if ( v === 2 || v === 4 ) dots++;
 
   return {
     state: 'start',
@@ -40,6 +40,7 @@ function createGame() {
       speed: PACMAN_SPEED,
     },
     ghostMode: { mode: 'scatter', frame: 0 },
+    frightened: { active: false, frame: 0, eatenCount: 0 },
     ghosts: GHOST_STARTS.map( ( g ) => ( {
       x: g.x,
       y: g.y,
@@ -49,6 +50,8 @@ function createGame() {
       corner: g.corner,
       released: false,
       releaseDelay: g.releaseDelay,
+      frightened: false, // asustado y comestible
+      eaten: false,      // comido: son solo ojos volviendo a la pen
     } ) ),
   };
 }
