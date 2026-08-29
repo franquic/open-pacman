@@ -70,10 +70,12 @@ function drawDots( ctx, grid ) {
   ctx.fillStyle = DOT_COLOR;
   for ( let y = 0; y < grid.length; y++ ) {
     for ( let x = 0; x < grid[ 0 ].length; x++ ) {
-      if ( grid[ y ][ x ] !== 2 ) continue;
+      const v = grid[ y ][ x ];
+      if ( v !== 2 && v !== 4 ) continue;
       const { cx, cy } = cellCenter( x, y );
+      const r = v === 4 ? 6 : 2.5; // power pellet grande, dot pequeno
       ctx.beginPath();
-      ctx.arc( cx, cy, 2.5, 0, Math.PI * 2 );
+      ctx.arc( cx, cy, r, 0, Math.PI * 2 );
       ctx.fill();
     }
   }
@@ -106,17 +108,20 @@ function drawGhost( ctx, g, color ) {
   const left = cx - r;
   const right = cx + r;
 
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc( cx, cy - 1, r, Math.PI, 0, false ); // cabeza
-  ctx.lineTo( right, bottom );
-  // falda ondulada (3 picos)
-  ctx.lineTo( right - r * 0.66, bottom - 4 );
-  ctx.lineTo( cx, bottom );
-  ctx.lineTo( left + r * 0.66, bottom - 4 );
-  ctx.lineTo( left, bottom );
-  ctx.closePath();
-  ctx.fill();
+  // Comido: solo ojos volviendo a la pen.
+  if ( !g.eaten ) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc( cx, cy - 1, r, Math.PI, 0, false ); // cabeza
+    ctx.lineTo( right, bottom );
+    // falda ondulada (3 picos)
+    ctx.lineTo( right - r * 0.66, bottom - 4 );
+    ctx.lineTo( cx, bottom );
+    ctx.lineTo( left + r * 0.66, bottom - 4 );
+    ctx.lineTo( left, bottom );
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // ojos mirando segun direccion
   const dir = DIRS[ g.dir ] || { x: 0, y: 0 };
@@ -151,6 +156,9 @@ const GHOST_COLORS = {
   coward: '#ffb852',     // Clyde
 };
 
+const FRIGHTENED_COLOR = '#2121de';
+const FRIGHTENED_FLASH_COLOR = '#ffffff';
+
 function draw( ctx, game, frame ) {
   const grid = game.grid;
   const W = grid[ 0 ].length;
@@ -163,7 +171,19 @@ function draw( ctx, game, frame ) {
   drawDoor( ctx, grid );
   drawDots( ctx, grid );
   drawPacman( ctx, game.pacman, frame );
-  game.ghosts.forEach( ( g ) => drawGhost( ctx, g, GHOST_COLORS[ g.kind ] || '#ff0000' ) );
+
+  // Asustados: cuerpo azul que parpadea a blanco en los ultimos ~2s
+  // (alternando cada ~10 frames mientras dure la ventana de aviso).
+  const fright = game.frightened;
+  const inFlashWindow =
+    fright.active && fright.frame >= FRIGHTENED_FRAMES - FRIGHTENED_FLASH_FRAMES;
+  const flashOn = inFlashWindow && Math.floor( frame / 10 ) % 2 === 0;
+
+  game.ghosts.forEach( ( g ) => {
+    let color = GHOST_COLORS[ g.kind ] || '#ff0000';
+    if ( g.frightened ) color = flashOn ? FRIGHTENED_FLASH_COLOR : FRIGHTENED_COLOR;
+    drawGhost( ctx, g, color );
+  } );
   drawHUD( ctx, game, W );
 }
 
