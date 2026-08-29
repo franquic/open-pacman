@@ -16,6 +16,13 @@ const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 const SCATTER_FRAMES = 420; // 7s a 60fps
 const CHASE_FRAMES = 1200;  // 20s a 60fps
 
+const FRIGHTENED_FRAMES = 360;       // 6s a 60fps
+const FRIGHTENED_FLASH_FRAMES = 120; // ultimos 2s parpadean
+const FRIGHTENED_SPEED = 0.06;       // ~60% de GHOST_SPEED
+const EYES_SPEED = 0.2;              // 2x GHOST_SPEED
+const PELLET_POINTS = 50;
+const GHOST_POINTS = [ 200, 400, 800, 1600 ];
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -90,6 +97,18 @@ function wrapTunnel( a, width ) {
   }
 }
 
+// Activar el modo asustado: reinicia timer y cadena, y los fantasmas ya
+// fuera de la pen (que no sean ojos) se asustan e invierten su direccion.
+function activateFrightened( game ) {
+  game.frightened = { active: true, frame: 0, eatenCount: 0 };
+  game.ghosts.forEach( ( g ) => {
+    if ( g.released && !g.eaten ) {
+      g.frightened = true;
+      g.dir = OPPOSITE[ g.dir ];
+    }
+  } );
+}
+
 function movePacman( game ) {
   const p = game.pacman;
   const grid = game.grid;
@@ -109,6 +128,13 @@ function movePacman( game ) {
       grid[ p.y ][ p.x ] = 0;
       game.score += 10;
       game.dotsRemaining--;
+    }
+    // Comer power pellet: activa el modo asustado.
+    if ( grid[ p.y ][ p.x ] === 4 ) {
+      grid[ p.y ][ p.x ] = 0;
+      game.score += PELLET_POINTS;
+      game.dotsRemaining--;
+      activateFrightened( game );
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
