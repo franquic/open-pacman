@@ -18,7 +18,7 @@ const CHASE_FRAMES = 1200;  // 20s a 60fps
 
 const FRIGHTENED_FRAMES = 360;       // 6s a 60fps
 const FRIGHTENED_FLASH_FRAMES = 120; // ultimos 2s parpadean
-const FRIGHTENED_SPEED = 0.06;       // ~60% de GHOST_SPEED
+const FRIGHTENED_SPEED = 0.05;       // 1/20 de celda/frame: divide 1 exacto
 const EYES_SPEED = 0.2;              // 2x GHOST_SPEED
 const PELLET_POINTS = 50;
 const GHOST_POINTS = [ 200, 400, 800, 1600 ];
@@ -331,11 +331,17 @@ function update( game ) {
   movePacman( game );
 
   // Modo asustado: el ciclo scatter/chase se congela mientras dure el efecto.
+  // Al cambiar de modo hay que hacer snap a la rejilla: el resto fraccionario
+  // de la velocidad anterior (0.05) no vuelve a 0 con la nueva (0.1/0.2) y el
+  // actor dejaria de alinearse (bug de atravesar paredes).
   if ( game.frightened.active ) {
     game.frightened.frame++;
     if ( game.frightened.frame >= FRIGHTENED_FRAMES ) {
       game.frightened = { active: false, frame: 0, eatenCount: 0 };
       game.ghosts.forEach( ( g ) => {
+        if ( !g.frightened ) return;
+        g.x = Math.round( g.x );
+        g.y = Math.round( g.y );
         g.frightened = false;
       } );
     }
@@ -357,9 +363,12 @@ function update( game ) {
     if ( g.eaten ) continue; // los ojos ni matan ni son comestibles
     if ( g.frightened ) {
       // Comerselo: puntos de la cadena y se convierte en ojos.
+      // Snap a la rejilla antes de cambiar de modo (ver nota arriba).
       const pts = GHOST_POINTS[ Math.min( game.frightened.eatenCount, GHOST_POINTS.length - 1 ) ];
       game.score += pts;
       game.frightened.eatenCount++;
+      g.x = Math.round( g.x );
+      g.y = Math.round( g.y );
       g.eaten = true;
       g.frightened = false;
       continue;
