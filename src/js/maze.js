@@ -51,9 +51,14 @@ const MAZE = MAZE_STR.map( ( row ) => row.split( '' ).map( parseTile ) );
 
 const TUNNEL_ROW = 14;
 const PACMAN_START = { x: 13, y: 23 };
+// kind: aggressive (Blinky), ambusher (Pinky), flanker (Inky), coward (Clyde).
+// corner: celda objetivo en modo dispersion. releaseDelay: frames de espera
+// antes de salir de la pen (60 fps ≈ 1.5s entre fantasmas).
 const GHOST_STARTS = [
-  { x: 13, y: 14, kind: 'hunter' }, // dentro de la pen
-  { x: 14, y: 14, kind: 'random' }, // dentro de la pen
+  { x: 12, y: 14, kind: 'aggressive', corner: { x: 25, y: 1 }, releaseDelay: 0 },
+  { x: 13, y: 14, kind: 'ambusher', corner: { x: 2, y: 1 }, releaseDelay: 90 },
+  { x: 14, y: 14, kind: 'flanker', corner: { x: 26, y: 29 }, releaseDelay: 180 },
+  { x: 15, y: 14, kind: 'coward', corner: { x: 1, y: 29 }, releaseDelay: 270 },
 ];
 
 window.MAZE = MAZE;

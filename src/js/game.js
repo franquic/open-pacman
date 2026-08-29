@@ -13,6 +13,9 @@ const OPPOSITE = { left: 'right', right: 'left', up: 'down', down: 'up' };
 const PACMAN_SPEED = 0.125; // 1/8 celda/frame -> alinea cada 8 frames
 const GHOST_SPEED = 0.1;    // 1/10 celda/frame
 
+const SCATTER_FRAMES = 420; // 7s a 60fps
+const CHASE_FRAMES = 1200;  // 20s a 60fps
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -36,12 +39,16 @@ function createGame() {
       nextDir: null,
       speed: PACMAN_SPEED,
     },
+    ghostMode: { mode: 'scatter', frame: 0 },
     ghosts: GHOST_STARTS.map( ( g ) => ( {
       x: g.x,
       y: g.y,
       dir: 'up',
       speed: GHOST_SPEED,
       kind: g.kind,
+      corner: g.corner,
+      released: false,
+      releaseDelay: g.releaseDelay,
     } ) ),
   };
 }
@@ -51,14 +58,14 @@ function aligned( v ) {
 }
 
 // Una celda es muro para el actor dado?
-//   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado solo por pared (1)
+// La puerta (3) bloquea a todos: la salida de la pen es scriptada
+// (moveGhostInPen), asi que ningun fantasma vuelve a entrar por decision propia.
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
   if ( v === 1 ) return true;
-  if ( v === 3 && actor === 'pacman' ) return true;
+  if ( v === 3 ) return true;
   return false;
 }
 
@@ -110,9 +117,41 @@ function movePacman( game ) {
   wrapTunnel( p, width );
 }
 
+// Celda objetivo del fantasma segun su kind y el modo global.
+//   aggressive: la celda de Pac-Man (persecucion directa).
+//   ambusher:   4 celdas delante de Pac-Man en su direccion.
+//   flanker:    pivote 2 celdas delante de Pac-Man reflejado respecto al aggressive.
+//   coward:     Pac-Man si esta lejos (>8), su esquina si esta cerca.
+// En scatter todos apuntan a su corner.
+function ghostTarget( game, g ) {
+  if ( game.ghostMode.mode === 'scatter' ) return g.corner;
+
+  const p = game.pacman;
+  const px = Math.round( p.x );
+  const py = Math.round( p.y );
+  const pd = DIRS[ p.dir ] || DIRS.left;
+
+  if ( g.kind === 'ambusher' ) {
+    return { x: px + pd.x * 4, y: py + pd.y * 4 };
+  }
+  if ( g.kind === 'flanker' ) {
+    const pivotX = px + pd.x * 2;
+    const pivotY = py + pd.y * 2;
+    const aggressive = game.ghosts.find( ( gg ) => gg.kind === 'aggressive' );
+    const ax = aggressive ? Math.round( aggressive.x ) : px;
+    const ay = aggressive ? Math.round( aggressive.y ) : py;
+    return { x: pivotX * 2 - ax, y: pivotY * 2 - ay };
+  }
+  if ( g.kind === 'coward' ) {
+    const dist = Math.abs( Math.round( g.x ) - px ) + Math.abs( Math.round( g.y ) - py );
+    return dist <= 8 ? g.corner : { x: px, y: py };
+  }
+  // aggressive (y cualquier kind desconocido): la celda de Pac-Man.
+  return { x: px, y: py };
+}
+
 function decideGhost( game, g ) {
   const grid = game.grid;
-  const p = game.pacman;
 
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
@@ -120,30 +159,54 @@ function decideGhost( game, g ) {
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'hunter' ) {
-    const px = Math.round( p.x );
-    const py = Math.round( p.y );
-    let best = choices[ 0 ];
-    let bestDist = Infinity;
-    for ( const dir of choices ) {
-      const d = DIRS[ dir ];
-      const nx = g.x + d.x;
-      const ny = g.y + d.y;
-      const dist = Math.abs( nx - px ) + Math.abs( ny - py );
-      if ( dist < bestDist ) {
-        bestDist = dist;
-        best = dir;
-      }
+  const target = ghostTarget( game, g );
+  let best = choices[ 0 ];
+  let bestDist = Infinity;
+  for ( const dir of choices ) {
+    const d = DIRS[ dir ];
+    const nx = g.x + d.x;
+    const ny = g.y + d.y;
+    const dist = Math.abs( nx - target.x ) + Math.abs( ny - target.y );
+    if ( dist < bestDist ) {
+      bestDist = dist;
+      best = dir;
     }
-    g.dir = best;
-  } else {
-    g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
   }
+  g.dir = best;
+}
+
+// Dentro de la pen: esperar el releaseDelay y salir por la puerta (cols 13-14).
+// La salida es scriptada (no usa decideGhost): alinear con la columna 13-14,
+// subir hasta la fila 11 y ahi marcar released.
+function moveGhostInPen( g ) {
+  if ( g.releaseDelay > 0 ) {
+    g.releaseDelay--;
+    return;
+  }
+  if ( aligned( g.x ) && aligned( g.y ) ) {
+    g.x = Math.round( g.x );
+    g.y = Math.round( g.y );
+    if ( g.y <= 11 ) {
+      g.released = true;
+      g.dir = 'left';
+      return;
+    }
+    if ( g.x === 13 || g.x === 14 ) g.dir = 'up';
+    else g.dir = g.x < 13 ? 'right' : 'left';
+  }
+  const d = DIRS[ g.dir ];
+  g.x += d.x * g.speed;
+  g.y += d.y * g.speed;
 }
 
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
+
+  if ( !g.released ) {
+    moveGhostInPen( g );
+    return;
+  }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
@@ -164,10 +227,15 @@ function resetPositions( game ) {
   p.y = PACMAN_START.y;
   p.dir = 'left';
   p.nextDir = null;
+  game.ghostMode = { mode: 'scatter', frame: 0 };
   game.ghosts.forEach( ( g, i ) => {
-    g.x = GHOST_STARTS[ i ].x;
-    g.y = GHOST_STARTS[ i ].y;
+    const start = GHOST_STARTS[ i ];
+    g.x = start.x;
+    g.y = start.y;
     g.dir = 'up';
+    g.corner = start.corner;
+    g.released = false;
+    g.releaseDelay = start.releaseDelay;
   } );
 }
 
@@ -177,6 +245,16 @@ function collides( a, b ) {
 
 function update( game ) {
   movePacman( game );
+
+  // Ciclo global de modos: scatter 7s -> chase 20s -> repetir.
+  const m = game.ghostMode;
+  m.frame++;
+  const limit = m.mode === 'scatter' ? SCATTER_FRAMES : CHASE_FRAMES;
+  if ( m.frame >= limit ) {
+    m.mode = m.mode === 'scatter' ? 'chase' : 'scatter';
+    m.frame = 0;
+  }
+
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
