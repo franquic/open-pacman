@@ -309,6 +309,7 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.ghostMode = { mode: 'scatter', frame: 0 };
+  game.frightened = { active: false, frame: 0, eatenCount: 0 };
   game.ghosts.forEach( ( g, i ) => {
     const start = GHOST_STARTS[ i ];
     g.x = start.x;
@@ -317,6 +318,8 @@ function resetPositions( game ) {
     g.corner = start.corner;
     g.released = false;
     g.releaseDelay = start.releaseDelay;
+    g.frightened = false;
+    g.eaten = false;
   } );
 }
 
@@ -350,15 +353,24 @@ function update( game ) {
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    if ( !collides( game.pacman, g ) ) continue;
+    if ( g.eaten ) continue; // los ojos ni matan ni son comestibles
+    if ( g.frightened ) {
+      // Comerselo: puntos de la cadena y se convierte en ojos.
+      const pts = GHOST_POINTS[ Math.min( game.frightened.eatenCount, GHOST_POINTS.length - 1 ) ];
+      game.score += pts;
+      game.frightened.eatenCount++;
+      g.eaten = true;
+      g.frightened = false;
+      continue;
     }
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
   if ( game.dotsRemaining <= 0 ) game.state = 'won';
