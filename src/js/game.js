@@ -179,16 +179,14 @@ function ghostTarget( game, g ) {
   return { x: px, y: py };
 }
 
-function decideGhost( game, g ) {
-  const grid = game.grid;
-
+// Direccion valida (sin giro de 180) que minimiza distancia Manhattan al
+// target. Callejon sin salida: permitir el giro de 180.
+function chooseDirToward( grid, g, target ) {
   const options = Object.keys( DIRS ).filter(
     ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
   );
-  // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  const target = ghostTarget( game, g );
   let best = choices[ 0 ];
   let bestDist = Infinity;
   for ( const dir of choices ) {
@@ -201,7 +199,20 @@ function decideGhost( game, g ) {
       best = dir;
     }
   }
-  g.dir = best;
+  return best;
+}
+
+function decideGhost( game, g ) {
+  g.dir = chooseDirToward( game.grid, g, ghostTarget( game, g ) );
+}
+
+// Asustado: direccion aleatoria entre las validas sin giro de 180.
+function decideFrightened( grid, g ) {
+  const options = Object.keys( DIRS ).filter(
+    ( dir ) => dir !== OPPOSITE[ g.dir ] && canMove( grid, g.x, g.y, dir, 'ghost' )
+  );
+  const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
+  g.dir = choices[ Math.floor( Math.random() * choices.length ) ];
 }
 
 // Dentro de la pen: esperar el releaseDelay y salir por la puerta (cols 13-14).
@@ -228,6 +239,39 @@ function moveGhostInPen( g ) {
   g.y += d.y * g.speed;
 }
 
+// Ojos (fantasma comido): targeting voraz hacia la entrada de la puerta
+// (13,11) y descenso scriptado por la puerta (cols 13-14) hasta la pen
+// (13,14), donde revive y la salida scriptada existente lo saca de nuevo.
+// La puerta solo es transitable aqui porque el descenso no usa canMove.
+const DOOR_ENTRY = { x: 13, y: 11 };
+
+function moveGhostEyes( game, g ) {
+  const grid = game.grid;
+
+  if ( aligned( g.x ) && aligned( g.y ) ) {
+    g.x = Math.round( g.x );
+    g.y = Math.round( g.y );
+    if ( g.y >= 14 ) {
+      // Dentro de la pen: revive y vuelve a salir.
+      g.eaten = false;
+      g.frightened = false;
+      g.released = false;
+      g.releaseDelay = 0;
+      g.dir = 'up';
+      return;
+    }
+    if ( ( g.x === 13 || g.x === 14 ) && g.y >= 11 ) {
+      g.dir = 'down'; // descenso scriptado por la puerta
+    } else {
+      g.dir = chooseDirToward( grid, g, DOOR_ENTRY );
+    }
+  }
+
+  const d = DIRS[ g.dir ];
+  g.x += d.x * EYES_SPEED;
+  g.y += d.y * EYES_SPEED;
+}
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
@@ -237,16 +281,24 @@ function moveGhost( game, g ) {
     return;
   }
 
+  if ( g.eaten ) {
+    moveGhostEyes( game, g );
+    return;
+  }
+
+  const speed = g.frightened ? FRIGHTENED_SPEED : g.speed;
+
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
-    decideGhost( game, g );
+    if ( g.frightened ) decideFrightened( grid, g );
+    else decideGhost( game, g );
     if ( !canMove( grid, g.x, g.y, g.dir, 'ghost' ) ) return;
   }
 
   const d = DIRS[ g.dir ];
-  g.x += d.x * g.speed;
-  g.y += d.y * g.speed;
+  g.x += d.x * speed;
+  g.y += d.y * speed;
   wrapTunnel( g, width );
 }
 
@@ -275,13 +327,24 @@ function collides( a, b ) {
 function update( game ) {
   movePacman( game );
 
-  // Ciclo global de modos: scatter 7s -> chase 20s -> repetir.
-  const m = game.ghostMode;
-  m.frame++;
-  const limit = m.mode === 'scatter' ? SCATTER_FRAMES : CHASE_FRAMES;
-  if ( m.frame >= limit ) {
-    m.mode = m.mode === 'scatter' ? 'chase' : 'scatter';
-    m.frame = 0;
+  // Modo asustado: el ciclo scatter/chase se congela mientras dure el efecto.
+  if ( game.frightened.active ) {
+    game.frightened.frame++;
+    if ( game.frightened.frame >= FRIGHTENED_FRAMES ) {
+      game.frightened = { active: false, frame: 0, eatenCount: 0 };
+      game.ghosts.forEach( ( g ) => {
+        g.frightened = false;
+      } );
+    }
+  } else {
+    // Ciclo global de modos: scatter 7s -> chase 20s -> repetir.
+    const m = game.ghostMode;
+    m.frame++;
+    const limit = m.mode === 'scatter' ? SCATTER_FRAMES : CHASE_FRAMES;
+    if ( m.frame >= limit ) {
+      m.mode = m.mode === 'scatter' ? 'chase' : 'scatter';
+      m.frame = 0;
+    }
   }
 
   game.ghosts.forEach( ( g ) => moveGhost( game, g ) );
