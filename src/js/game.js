@@ -47,7 +47,7 @@ function createGame() {
       speed: GHOST_SPEED,
       kind: g.kind,
       corner: g.corner,
-      released: g.releaseDelay <= 0,
+      released: false,
       releaseDelay: g.releaseDelay,
     } ) ),
   };
@@ -58,14 +58,14 @@ function aligned( v ) {
 }
 
 // Una celda es muro para el actor dado?
-//   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado solo por pared (1)
+// La puerta (3) bloquea a todos: la salida de la pen es scriptada
+// (moveGhostInPen), asi que ningun fantasma vuelve a entrar por decision propia.
 function isWall( grid, x, y, actor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
   const v = grid[ y ][ x ];
   if ( v === 1 ) return true;
-  if ( v === 3 && actor === 'pacman' ) return true;
+  if ( v === 3 ) return true;
   return false;
 }
 
@@ -148,9 +148,38 @@ function decideGhost( game, g ) {
   }
 }
 
+// Dentro de la pen: esperar el releaseDelay y salir por la puerta (cols 13-14).
+// La salida es scriptada (no usa decideGhost): alinear con la columna 13-14,
+// subir hasta la fila 11 y ahi marcar released.
+function moveGhostInPen( g ) {
+  if ( g.releaseDelay > 0 ) {
+    g.releaseDelay--;
+    return;
+  }
+  if ( aligned( g.x ) && aligned( g.y ) ) {
+    g.x = Math.round( g.x );
+    g.y = Math.round( g.y );
+    if ( g.y <= 11 ) {
+      g.released = true;
+      g.dir = 'left';
+      return;
+    }
+    if ( g.x === 13 || g.x === 14 ) g.dir = 'up';
+    else g.dir = g.x < 13 ? 'right' : 'left';
+  }
+  const d = DIRS[ g.dir ];
+  g.x += d.x * g.speed;
+  g.y += d.y * g.speed;
+}
+
 function moveGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
+
+  if ( !g.released ) {
+    moveGhostInPen( g );
+    return;
+  }
 
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
