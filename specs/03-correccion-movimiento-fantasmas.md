@@ -1,6 +1,6 @@
 # SPEC 03 — Corrección del movimiento de fantasmas (paredes y ojos)
 
-> **Estado:** Aprovado
+> **Estado:** Implementado
 > **Depende on:** SPEC 02
 > **Fecha:** 2026-08-29
 > **Objetivo:** Arreglar que los fantasmas asustados y los ojos atraviesen paredes y que los ojos nunca vuelvan a la caseta, restaurando el invariante de alineación con la rejilla.

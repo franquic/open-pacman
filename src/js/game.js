@@ -97,6 +97,30 @@ function wrapTunnel( a, width ) {
   }
 }
 
+// Salvaguarda por frame (red de seguridad): si la celda siguiente en la
+// direccion actual es muro y el paso cruzaria el centro de la celda
+// actual, el actor frena en ese centro. Con velocidades que dividen 1 no
+// deberia activarse nunca; existe para que una velocidad mal elegida no
+// reproduzca en silencio el bug de atravesar paredes.
+// Devuelve true si freno al actor.
+function clampToCenter( grid, a, dir, speed, actor ) {
+  const d = DIRS[ dir ];
+  if ( !d ) return false;
+  const rx = Math.round( a.x );
+  const ry = Math.round( a.y );
+  if ( canMove( grid, rx, ry, dir, actor ) ) return false;
+  const nx = a.x + d.x * speed;
+  const ny = a.y + d.y * speed;
+  const crossX = d.x > 0 ? nx >= rx : d.x < 0 ? nx <= rx : false;
+  const crossY = d.y > 0 ? ny >= ry : d.y < 0 ? ny <= ry : false;
+  if ( crossX || crossY ) {
+    a.x = rx;
+    a.y = ry;
+    return true;
+  }
+  return false;
+}
+
 // Activar el modo asustado: reinicia timer y cadena, y los fantasmas ya
 // fuera de la pen (que no sean ojos) se asustan e invierten su direccion.
 function activateFrightened( game ) {
@@ -141,6 +165,7 @@ function movePacman( game ) {
   }
 
   const d = DIRS[ p.dir ];
+  if ( clampToCenter( grid, p, p.dir, p.speed, 'pacman' ) ) return;
   p.x += d.x * p.speed;
   p.y += d.y * p.speed;
   wrapTunnel( p, width );
@@ -239,11 +264,67 @@ function moveGhostInPen( g ) {
   g.y += d.y * g.speed;
 }
 
-// Ojos (fantasma comido): targeting voraz hacia la entrada de la puerta
-// (13,11) y descenso scriptado por la puerta (cols 13-14) hasta la pen
-// (13,14), donde revive y la salida scriptada existente lo saca de nuevo.
-// La puerta solo es transitable aqui porque el descenso no usa canMove.
+// Ojos (fantasma comido): bajan por el gradiente de un mapa de distancias
+// BFS hasta la entrada de la puerta (13,11) y descenso scriptado por la
+// puerta (cols 13-14) hasta la pen (13,14), donde revive y la salida
+// scriptada existente lo saca de nuevo. La puerta solo es transitable en
+// ese descenso: en el BFS cuenta como muro.
 const DOOR_ENTRY = { x: 13, y: 11 };
+
+// Mapa de distancias BFS desde DOOR_ENTRY (solo lectura). Calculo perezoso:
+// se calcula la primera vez que un fantasma es comido y no se muta jamas.
+let eyesDistMap = null;
+
+function getEyesDist() {
+  if ( eyesDistMap ) return eyesDistMap;
+  const H = MAZE.length;
+  const W = MAZE[ 0 ].length;
+  const dist = Array.from( { length: H }, () => new Array( W ).fill( Infinity ) );
+  dist[ DOOR_ENTRY.y ][ DOOR_ENTRY.x ] = 0;
+  const queue = [ { x: DOOR_ENTRY.x, y: DOOR_ENTRY.y } ];
+  while ( queue.length ) {
+    const c = queue.shift();
+    for ( const d of Object.values( DIRS ) ) {
+      let nx = c.x + d.x;
+      const ny = c.y + d.y;
+      // El tunel conecta los dos bordes de su fila.
+      if ( ny === TUNNEL_ROW && nx < 0 ) nx = W - 1;
+      else if ( ny === TUNNEL_ROW && nx >= W ) nx = 0;
+      if ( ny < 0 || ny >= H || nx < 0 || nx >= W ) continue;
+      const v = MAZE[ ny ][ nx ];
+      if ( v === 1 || v === 3 ) continue; // pared y puerta bloquean
+      if ( dist[ ny ][ nx ] !== Infinity ) continue;
+      dist[ ny ][ nx ] = dist[ c.y ][ c.x ] + 1;
+      queue.push( { x: nx, y: ny } );
+    }
+  }
+  eyesDistMap = dist;
+  return dist;
+}
+
+// Direccion valida que minimiza la distancia BFS a la entrada de la puerta.
+// A diferencia del greedy, el gradiente garantiza llegar desde cualquier
+// celda (el greedy podia orbitar un bloque indefinidamente).
+function decideEyes( grid, g ) {
+  const dist = getEyesDist();
+  const W = grid[ 0 ].length;
+  let best = g.dir;
+  let bestDist = Infinity;
+  for ( const dir of Object.keys( DIRS ) ) {
+    if ( !canMove( grid, g.x, g.y, dir, 'ghost' ) ) continue;
+    const d = DIRS[ dir ];
+    let nx = g.x + d.x;
+    const ny = g.y + d.y;
+    if ( ny === TUNNEL_ROW && nx < 0 ) nx = W - 1;
+    else if ( ny === TUNNEL_ROW && nx >= W ) nx = 0;
+    const nd = dist[ ny ][ nx ];
+    if ( nd !== undefined && nd < bestDist ) {
+      bestDist = nd;
+      best = dir;
+    }
+  }
+  g.dir = best;
+}
 
 function moveGhostEyes( game, g ) {
   const grid = game.grid;
@@ -251,8 +332,11 @@ function moveGhostEyes( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
-    if ( g.y >= 14 ) {
-      // Dentro de la pen: revive y vuelve a salir.
+    // Dentro de la pen (cols 11-16, filas 14-15; solo alcanzable por el
+    // descenso scriptado): revive y sale. Ojo: una condicion mas floja
+    // (p.ej. solo y >= 14) haria "revivir" al fantasma donde fue comido,
+    // porque media parte baja del laberinto cumple y >= 14.
+    if ( g.x >= 11 && g.x <= 16 && g.y >= 14 && g.y <= 15 ) {
       g.eaten = false;
       g.frightened = false;
       g.released = false;
@@ -260,16 +344,20 @@ function moveGhostEyes( game, g ) {
       g.dir = 'up';
       return;
     }
-    if ( ( g.x === 13 || g.x === 14 ) && g.y >= 11 ) {
-      g.dir = 'down'; // descenso scriptado por la puerta
+    // Descenso scriptado por la puerta: solo en la region de la puerta
+    // (cols 13-14, filas 11-13). Ojo: x===13 solo cubreria cualquier punto
+    // de esa columna en medio laberinto y el ojo bajaria por la pared.
+    if ( ( g.x === 13 || g.x === 14 ) && g.y >= 11 && g.y <= 13 ) {
+      g.dir = 'down';
     } else {
-      g.dir = chooseDirToward( grid, g, DOOR_ENTRY );
+      decideEyes( grid, g );
     }
   }
 
   const d = DIRS[ g.dir ];
   g.x += d.x * EYES_SPEED;
   g.y += d.y * EYES_SPEED;
+  wrapTunnel( g, grid[ 0 ].length );
 }
 
 function moveGhost( game, g ) {
@@ -297,6 +385,7 @@ function moveGhost( game, g ) {
   }
 
   const d = DIRS[ g.dir ];
+  if ( clampToCenter( grid, g, g.dir, speed, 'ghost' ) ) return;
   g.x += d.x * speed;
   g.y += d.y * speed;
   wrapTunnel( g, width );
